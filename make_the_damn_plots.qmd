@@ -1,0 +1,241 @@
+---
+title: "images for spp_chi fig"
+format: 
+  html:
+    embed-resources: true
+editor: visual
+---
+
+# Summary
+
+The summary figure for the spp chi paper methods needs a few images to represent rasters during the processing phase:
+
+* four or five examples of species distributions (presence/absence)
+* three or so examples of stressor distributions (continuous 0 - 1)
+
+For each species, we will need a species-level impact map; each species will have some vector of vulnerability scores that will be represented by little gauges, so each stressor should get a different weight.
+
+We need a single map of species-equal-weighted CHI that takes the average CHI across all spp, and another that weights the maps based on FE membership.
+
+All these maps should be gridded about 8 or 10 square, and the images then skewed/distorted in such a way to make them look 3D-ish.  Using the `magick` package, examine the `transform()` functions like `image_shear`.
+
+
+```{r}
+library(tidyverse)
+library(here)
+library(readxl)
+library(terra)
+library(magick)
+
+# x <- image_read('hot_sauce.jpg') %>% image_scale('300')
+# print(x)
+# 
+# y <- image_shear(x, geometry = '30x0')
+# print(y)
+# 
+# z <- image_resize(y, geometry = '100%x40%')
+# print(z)
+```
+
+# Methods
+
+## Generate some species and stressor rasters
+
+Some fake rasters were generated in Excel for 4 species and 3 stressors.  Read these in!
+
+```{r}
+lyrs <- readxl::excel_sheets(here('data/fake_rasts.xlsx'))
+df_stack <- lapply(lyrs, FUN = function(l) {
+  ### l <- lyrs[1]
+  x <- read_excel( here('data/fake_rasts.xlsx'), sheet = l, col_names = FALSE) %>%
+    setNames(1:10) %>%
+    mutate(y = 1:10) %>%
+    pivot_longer(-y, values_to = 'val', names_to = 'x') %>%
+    mutate(x = as.numeric(x))
+}) %>% setNames(lyrs) %>%
+  bind_rows(.id = 'layer')
+```
+
+
+Plot these as tiles with borders.  For species, use a darker blue/lighter grey color scheme for presence/absence.  For stressors, try a Viridis color scale?
+
+```{r}
+for(l in lyrs[1:4]) {
+  ### l <- lyrs[1]
+  l_df <- df_stack %>%
+    filter(layer == l) %>%
+    mutate(val = factor(val))
+  
+  ggplot(l_df, aes(x, y)) +
+    geom_tile(aes(fill = val), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+    scale_fill_manual(values = c('grey96', 'slateblue')) +
+    coord_equal() +
+    theme_void()
+  
+  ggsave(here('rasts_raw', sprintf('rast_%s.png', l)), height = 3, width = 3, dpi = 300)
+}
+```
+
+```{r}
+for(l in lyrs[5:7]) {
+  ### l <- lyrs[5]
+  l_df <- df_stack %>%
+    filter(layer == l)
+  
+  ggplot(l_df, aes(x, y)) +
+    geom_tile(aes(fill = val), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+    scale_fill_gradientn(colors = c('grey96', 'orange', 'darkred')) +
+    coord_equal() +
+    theme_void()
+  
+  ggsave(here('rasts_raw', sprintf('rast_%s.png', l)), height = 3, width = 3, dpi = 300)
+}
+```
+
+## Now, for each species, calc a total impact layer
+
+```{r}
+spp_vs <- list(spp1 = c(str1 = 0.1, str2 = 0.7, str3 = 1.0),
+               spp2 = c(str1 = 1.0, str2 = 0.1, str3 = 0.4),
+               spp3 = c(str1 = 0.5, str2 = 0.3, str3 = 0.1),
+               spp4 = c(str1 = 1.0, str2 = 0.3, str3 = 0.0))
+
+strs_df <- df_stack %>% filter(str_detect(layer, 'str')) %>% rename(intensity = val)
+spp_df <- df_stack %>%
+  rename(spp = layer, pres = val) %>%
+  filter(str_detect(spp, 'spp'))
+  
+spp_impact_df <- spp_df %>%
+  mutate(pres = ifelse(pres == 1, 1, NA)) %>%
+  mutate(vuln = spp_vs[spp]) %>%
+  unnest(vuln) %>%
+  mutate(str = paste0('str', rep(1:3, length.out = n()))) %>%
+  left_join(strs_df, by = c('x', 'y', 'str' = 'layer')) %>%
+  group_by(spp, x, y) %>%
+  summarize(impact = sum(pres * vuln * intensity))
+
+spp_vec <- spp_impact_df$spp %>% unique()
+for(s in spp_vec) {
+  ### s <- spp_vec[1]
+  i_df <- spp_impact_df %>%
+    filter(spp == s)
+  
+  ggplot(i_df, aes(x, y)) +
+    geom_tile(aes(fill = impact), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+    scale_fill_viridis_c(na.value = 'grey90')+
+    coord_equal() +
+    theme_void()
+  
+  ggsave(here('rasts_raw', sprintf('rast_impact_%s.png', s)), height = 3, width = 3, dpi = 300)
+}
+```
+
+## Now, combine species and calc overall outs
+
+### spp richness and impact
+
+```{r}
+chi_spp_df <- spp_impact_df %>%
+  filter(!is.na(impact)) %>%
+  group_by(x, y) %>%
+  summarize(chi = mean(impact)) %>%
+  ungroup() %>%
+  complete(x, y)
+
+spp_rich_df <- spp_df %>%
+  group_by(x, y) %>%
+  summarize(spp_rich = sum(pres))
+
+ggplot(chi_spp_df, aes(x, y)) +
+  geom_tile(aes(fill = chi), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+  scale_fill_viridis_c(na.value = 'grey90')+
+  coord_equal() +
+  theme_void()
+
+ggsave(here('rasts_raw', 'rast_spp_chi.png'), height = 3, width = 3, dpi = 300)
+
+ggplot(spp_rich_df, aes(x, y)) +
+  geom_tile(aes(fill = spp_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+  scale_fill_viridis_c(na.value = 'grey90')+
+  coord_equal() +
+  theme_void()
+
+ggsave(here('rasts_raw', 'rast_spp_richness.png'), height = 3, width = 3, dpi = 300)
+
+```
+
+### FE richness and impact
+
+```{r}
+
+chi_fe_df <- spp_impact_df %>%
+  filter(!is.na(impact)) %>%
+  mutate(fe = ifelse(spp == 'spp1', 1, 2)) %>%
+  group_by(x, y, fe) %>%
+  summarize(fe_mean = mean(impact),
+            fv = .5^(n()-1)) %>%
+  group_by(x, y) %>%
+  summarize(chi = sum(fe_mean * fv) / sum(fv))
+
+fe_rich_df <- spp_df %>%
+  filter(pres == 1) %>%
+  mutate(fe = ifelse(spp == 'spp1', 1, 2)) %>%
+  group_by(x, y) %>%
+  summarize(func_rich = n_distinct(fe),
+            fv = .5^(n()-1))
+
+ggplot(chi_fe_df, aes(x, y)) +
+  geom_tile(aes(fill = chi), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+  scale_fill_viridis_c(na.value = 'grey90')+
+  coord_equal() +
+  theme_void()
+
+ggsave(here('rasts_raw', 'rast_fe_chi.png'), height = 3, width = 3, dpi = 300)
+
+ggplot(fe_rich_df, aes(x, y)) +
+  geom_tile(aes(fill = func_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+  scale_fill_viridis_c(na.value = 'grey90')+
+  coord_equal() +
+  theme_void()
+
+ggsave(here('rasts_raw', 'rast_fe_richness.png'), height = 3, width = 3, dpi = 300)
+
+```
+and diff raster
+```{r}
+fe_spp_diff <- left_join(chi_spp_df, chi_fe_df %>% rename(chi_fe = chi)) %>% mutate(d = chi_fe - chi)
+
+pal <- hcl.colors(3, palette = 'Red-Green')
+
+ggplot(fe_spp_diff, aes(x, y)) +
+  geom_tile(aes(fill = d), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+  scale_fill_gradient2(high = pal[1], low = pal[3], mid = pal[2], midpoint = 0)+
+  coord_equal() +
+  theme_void()
+
+ggsave(here('rasts_raw', 'rast_fe_spp_diff.png'), height = 3, width = 3, dpi = 300)
+
+```
+
+## Now, skew each image and save out
+
+```{r}
+raw_fs <- list.files(here('rasts_raw'), full.names = TRUE)
+
+for(f in raw_fs) {
+  ### f <- raw_fs[1]
+  x <- image_read(f)
+  
+  y <- image_shear(x, geometry = '30x0') %>%
+    image_trim() %>%
+    image_resize(geometry = '100%x40%')
+  image_write(y, here('rasts_xfm', basename(f)))
+
+}
+```
+
+
+
+
+
+
