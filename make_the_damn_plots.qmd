@@ -88,7 +88,7 @@ for(l in lyrs[5:7]) {
 ## Now, for each species, calc a total impact layer
 
 ```{r}
-spp_vs <- list(spp1 = c(str1 = 0.1, str2 = 0.8, str3 = 1.0),
+spp_vs <- list(spp1 = c(str1 = 0.2, str2 = 0.8, str3 = 1.0),
                spp2 = c(str1 = 0.6, str2 = 0.2, str3 = 0.2),
                spp3 = c(str1 = 1.0, str2 = 0.1, str3 = 0.1),
                spp4 = c(str1 = 1.0, str2 = 0.2, str3 = 0.1))
@@ -122,6 +122,33 @@ for(s in spp_vec) {
     theme_void()
   
   ggsave(here('rasts_raw', sprintf('rast_impact_%s.png', s)), height = 3, width = 3, dpi = 300)
+}
+```
+
+and for species 1, calc individual impact layers
+```{r}
+spp_impact_df <- spp_df %>%
+  filter(spp == 'spp1') %>%
+  mutate(pres = ifelse(pres == 1, 1, NA)) %>%
+  mutate(vuln = spp_vs['spp1']) %>%
+  unnest(vuln) %>%
+  mutate(str = paste0('str', rep(1:3, length.out = n()))) %>%
+  left_join(strs_df, by = c('x', 'y', 'str' = 'layer')) %>%
+  mutate(impact = (pres * vuln * intensity))
+
+str_vec <- spp_impact_df$str %>% unique()
+for(s in str_vec) {
+  ### s <- str_vec[2]
+  i_df <- spp_impact_df %>%
+    filter(str == s)
+  
+  ggplot(i_df, aes(x, y)) +
+    geom_tile(aes(fill = impact), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+    scale_fill_viridis_c(na.value = 'grey90', limits = c(0, 1))+
+    coord_equal() +
+    theme_void()
+  
+  ggsave(here('rasts_raw', sprintf('rast_spp1_impact_%s.png', s)), height = 3, width = 3, dpi = 300)
 }
 ```
 
