@@ -66,9 +66,11 @@ for(l in lyrs[1:4]) {
     filter(layer == l) %>%
     mutate(val = factor(val))
   
+  fill_cols <- c('grey96', ifelse(l == 'spp1', '#440044', 'slateblue'))
+  
   ggplot(l_df, aes(x, y)) +
     geom_tile(aes(fill = val), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-    scale_fill_manual(values = c('grey96', 'slateblue')) +
+    scale_fill_manual(values = fill_cols) +
     coord_equal() +
     theme_void()
   
@@ -84,7 +86,7 @@ for(l in lyrs[5:7]) {
   
   ggplot(l_df, aes(x, y)) +
     geom_tile(aes(fill = val), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-    scale_fill_gradientn(colors = c('grey96', 'orange', 'darkred')) +
+    scale_fill_gradientn(colors = c('grey96', 'orange', 'darkred'), limits = c(0, 1)) +
     coord_equal() +
     theme_void()
   
@@ -114,6 +116,8 @@ spp_impact_df <- spp_df %>%
   group_by(spp, x, y) %>%
   summarize(impact = sum(pres * vuln * intensity))
 
+chi_limits <- c(0, max(spp_impact_df$impact, na.rm = TRUE))
+
 spp_vec <- spp_impact_df$spp %>% unique()
 for(s in spp_vec) {
   ### s <- spp_vec[1]
@@ -122,7 +126,7 @@ for(s in spp_vec) {
   
   ggplot(i_df, aes(x, y)) +
     geom_tile(aes(fill = impact), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-    scale_fill_viridis_c(na.value = 'grey90')+
+    scale_fill_viridis_c(na.value = 'grey90', limits = chi_limits)+
     coord_equal() +
     theme_void()
   
@@ -142,10 +146,6 @@ chi_spp_df <- spp_impact_df %>%
   ungroup() %>%
   complete(x, y)
 
-spp_rich_df <- spp_df %>%
-  group_by(x, y) %>%
-  summarize(spp_rich = sum(pres))
-
 ggplot(chi_spp_df, aes(x, y)) +
   geom_tile(aes(fill = chi), color = 'grey30', linewidth = .75, show.legend = FALSE) +
   scale_fill_viridis_c(na.value = 'grey90')+
@@ -154,17 +154,50 @@ ggplot(chi_spp_df, aes(x, y)) +
 
 ggsave(here('rasts_raw', 'rast_spp_chi.png'), height = 3, width = 3, dpi = 300)
 
-ggplot(spp_rich_df, aes(x, y)) +
-  geom_tile(aes(fill = spp_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-  scale_fill_viridis_c(na.value = 'grey90')+
-  coord_equal() +
-  theme_void()
-
-ggsave(here('rasts_raw', 'rast_spp_richness.png'), height = 3, width = 3, dpi = 300)
+# spp_rich_df <- spp_df %>%
+#   group_by(x, y) %>%
+#   summarize(spp_rich = sum(pres))
+# 
+# ggplot(spp_rich_df, aes(x, y)) +
+#   geom_tile(aes(fill = spp_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+#   scale_fill_viridis_c(na.value = 'grey90')+
+#   coord_equal() +
+#   theme_void()
+# 
+# ggsave(here('rasts_raw', 'rast_spp_richness.png'), height = 3, width = 3, dpi = 300)
 
 ```
 
-### FE richness and impact
+### Impact by FE
+
+```{r}
+
+chi_per_fe_df <- spp_impact_df %>%
+  filter(!is.na(impact)) %>%
+  mutate(fe = ifelse(spp == 'spp1', 1, 2)) %>%
+  group_by(x, y, fe) %>%
+  summarize(fe_mean = mean(impact), .groups = 'drop') %>%
+  complete(x, y, fe)
+
+chi_lims <- c(0, max(chi_per_fe_df$fe_mean, na.rm = TRUE))
+
+for(f in unique(chi_per_fe_df$fe)) {
+  ### f <- 1
+  df <- chi_per_fe_df %>% 
+    filter(fe == f)
+  
+  ggplot(chi_per_fe_df %>% filter(fe == f), aes(x, y)) +
+    geom_tile(aes(fill = fe_mean), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+    scale_fill_viridis_c(na.value = 'grey90', limits = chi_lims)+
+    coord_equal() +
+    theme_void()
+
+  ggsave(here('rasts_raw', sprintf('rast_per_fe_%s_chi.png', f)), height = 3, width = 3, dpi = 300)
+
+}
+```
+
+### Overall FE richness and impact
 
 ```{r}
 
@@ -177,13 +210,6 @@ chi_fe_df <- spp_impact_df %>%
   group_by(x, y) %>%
   summarize(chi = sum(fe_mean * fv) / sum(fv))
 
-fe_rich_df <- spp_df %>%
-  filter(pres == 1) %>%
-  mutate(fe = ifelse(spp == 'spp1', 1, 2)) %>%
-  group_by(x, y) %>%
-  summarize(func_rich = n_distinct(fe),
-            fv = .5^(n()-1))
-
 ggplot(chi_fe_df, aes(x, y)) +
   geom_tile(aes(fill = chi), color = 'grey30', linewidth = .75, show.legend = FALSE) +
   scale_fill_viridis_c(na.value = 'grey90')+
@@ -192,13 +218,20 @@ ggplot(chi_fe_df, aes(x, y)) +
 
 ggsave(here('rasts_raw', 'rast_fe_chi.png'), height = 3, width = 3, dpi = 300)
 
-ggplot(fe_rich_df, aes(x, y)) +
-  geom_tile(aes(fill = func_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-  scale_fill_viridis_c(na.value = 'grey90')+
-  coord_equal() +
-  theme_void()
-
-ggsave(here('rasts_raw', 'rast_fe_richness.png'), height = 3, width = 3, dpi = 300)
+# fe_rich_df <- spp_df %>%
+#   filter(pres == 1) %>%
+#   mutate(fe = ifelse(spp == 'spp1', 1, 2)) %>%
+#   group_by(x, y) %>%
+#   summarize(func_rich = n_distinct(fe),
+#             fv = .5^(n()-1))
+# 
+# ggplot(fe_rich_df, aes(x, y)) +
+#   geom_tile(aes(fill = func_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+#   scale_fill_viridis_c(na.value = 'grey90')+
+#   coord_equal() +
+#   theme_void()
+# 
+# ggsave(here('rasts_raw', 'rast_fe_richness.png'), height = 3, width = 3, dpi = 300)
 
 ```
 and diff raster
@@ -209,7 +242,7 @@ pal <- hcl.colors(3, palette = 'Red-Green')
 
 ggplot(fe_spp_diff, aes(x, y)) +
   geom_tile(aes(fill = d), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-  scale_fill_gradient2(high = pal[1], low = pal[3], mid = pal[2], midpoint = 0)+
+  scale_fill_gradient2(high = pal[1], low = pal[3], mid = pal[2], midpoint = 0, limits = c(-.3, .3))+
   coord_equal() +
   theme_void()
 
