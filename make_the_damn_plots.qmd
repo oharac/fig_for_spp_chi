@@ -4,21 +4,23 @@ format:
   html:
     embed-resources: true
 editor: visual
+execute:
+  warning: false
+  message: false
 ---
 
 # Summary
 
 The summary figure for the spp chi paper methods needs a few images to represent rasters during the processing phase:
 
-* four or five examples of species distributions (presence/absence)
-* three or so examples of stressor distributions (continuous 0 - 1)
+-   four or five examples of species distributions (presence/absence)
+-   three or so examples of stressor distributions (continuous 0 - 1)
 
 For each species, we will need a species-level impact map; each species will have some vector of vulnerability scores that will be represented by little gauges, so each stressor should get a different weight.
 
 We need a single map of species-equal-weighted CHI that takes the average CHI across all spp, and another that weights the maps based on FE membership.
 
-All these maps should be gridded about 8 or 10 square, and the images then skewed/distorted in such a way to make them look 3D-ish.  Using the `magick` package, examine the `transform()` functions like `image_shear`.
-
+All these maps should be gridded about 8 or 10 square, and the images then skewed/distorted in such a way to make them look 3D-ish. Using the `magick` package, examine the `transform()` functions like `image_shear`.
 
 ```{r}
 library(tidyverse)
@@ -27,21 +29,13 @@ library(readxl)
 library(terra)
 library(magick)
 
-# x <- image_read('hot_sauce.jpg') %>% image_scale('300')
-# print(x)
-# 
-# y <- image_shear(x, geometry = '30x0')
-# print(y)
-# 
-# z <- image_resize(y, geometry = '100%x40%')
-# print(z)
 ```
 
 # Methods
 
 ## Generate some species and stressor rasters
 
-Some fake rasters were generated in Excel for 4 species and 3 stressors.  Read these in!
+Some fake rasters were generated in Excel for 4 species and 3 stressors. Read these in!
 
 ```{r}
 lyrs <- readxl::excel_sheets(here('data/fake_rasts.xlsx'))
@@ -56,51 +50,59 @@ df_stack <- lapply(lyrs, FUN = function(l) {
   bind_rows(.id = 'layer')
 ```
 
-
-Plot these as tiles with borders.  For species, use a darker blue/lighter grey color scheme for presence/absence.  For stressors, try a Viridis color scale?
+Plot these as tiles with borders. For species, use a darker blue/lighter grey color scheme for presence/absence. For stressors, try a Viridis color scale?
 
 ```{r}
+spp_layers <- lyrs[1:4]
+
 for(l in lyrs[1:4]) {
   ### l <- lyrs[1]
   l_df <- df_stack %>%
     filter(layer == l) %>%
     mutate(val = factor(val))
   
-  fill_cols <- c('grey96', ifelse(l == 'spp1', '#440044', 'slateblue'))
+  fill_cols <- c('grey96', ifelse(l == 'spp1', '#440000', 'slateblue'))
   
-  ggplot(l_df, aes(x, y)) +
+  p <- ggplot(l_df, aes(x, y)) +
     geom_tile(aes(fill = val), color = 'grey30', linewidth = .75, show.legend = FALSE) +
     scale_fill_manual(values = fill_cols) +
     coord_equal() +
     theme_void()
   
+  print(p)
+  
   ggsave(here('rasts_raw', sprintf('rast_%s.png', l)), height = 3, width = 3, dpi = 300)
 }
 ```
 
 ```{r}
-for(l in lyrs[5:7]) {
+str_layers <- lyrs[5:7]
+for(l in str_layers) {
   ### l <- lyrs[5]
   l_df <- df_stack %>%
     filter(layer == l)
   
-  ggplot(l_df, aes(x, y)) +
+  p <- ggplot(l_df, aes(x, y)) +
     geom_tile(aes(fill = val), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-    scale_fill_gradientn(colors = c('grey96', 'orange', 'darkred'), limits = c(0, 1)) +
+    scale_fill_gradientn(colors = c('#ffffee', 'orange', 'darkred'), limits = c(0, 1)) +
     coord_equal() +
     theme_void()
   
+  print(p)
+  
   ggsave(here('rasts_raw', sprintf('rast_%s.png', l)), height = 3, width = 3, dpi = 300)
 }
+
+
 ```
 
 ## Now, for each species, calc a total impact layer
 
 ```{r}
-spp_vs <- list(spp1 = c(str1 = 0.1, str2 = 0.7, str3 = 1.0),
-               spp2 = c(str1 = 1.0, str2 = 0.1, str3 = 0.4),
-               spp3 = c(str1 = 0.5, str2 = 0.3, str3 = 0.1),
-               spp4 = c(str1 = 1.0, str2 = 0.3, str3 = 0.0))
+spp_vs <- list(spp1 = c(str1 = 0.2, str2 = 0.8, str3 = 1.0),
+               spp2 = c(str1 = 0.6, str2 = 0.2, str3 = 0.2),
+               spp3 = c(str1 = 1.0, str2 = 0.1, str3 = 0.1),
+               spp4 = c(str1 = 1.0, str2 = 0.2, str3 = 0.1))
 
 strs_df <- df_stack %>% filter(str_detect(layer, 'str')) %>% rename(intensity = val)
 spp_df <- df_stack %>%
@@ -124,13 +126,47 @@ for(s in spp_vec) {
   i_df <- spp_impact_df %>%
     filter(spp == s)
   
-  ggplot(i_df, aes(x, y)) +
-    geom_tile(aes(fill = impact), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+  p <- ggplot(i_df, aes(x, y)) +
+    geom_tile(aes(fill = impact), color = 'grey30', 
+              linewidth = .75, show.legend = FALSE) +
     scale_fill_viridis_c(na.value = 'grey90', limits = chi_limits)+
     coord_equal() +
     theme_void()
   
-  ggsave(here('rasts_raw', sprintf('rast_impact_%s.png', s)), height = 3, width = 3, dpi = 300)
+  print(p)
+  
+  ggsave(here('rasts_raw', sprintf('rast_impact_%s.png', s)), 
+         height = 3, width = 3, dpi = 300)
+}
+```
+
+and for species 1, calc individual impact layers
+```{r}
+spp_str_impact_df <- spp_df %>%
+  filter(spp == 'spp1') %>%
+  mutate(pres = ifelse(pres == 1, 1, NA)) %>%
+  mutate(vuln = spp_vs['spp1']) %>%
+  unnest(vuln) %>%
+  mutate(str = paste0('str', rep(1:3, length.out = n()))) %>%
+  left_join(strs_df, by = c('x', 'y', 'str' = 'layer')) %>%
+  mutate(impact = (pres * vuln * intensity))
+
+str_vec <- spp_str_impact_df$str %>% unique()
+for(s in str_vec) {
+  ### s <- str_vec[2]
+  i_df <- spp_str_impact_df %>%
+    filter(str == s)
+  
+  p <- ggplot(i_df, aes(x, y)) +
+    geom_tile(aes(fill = impact), color = 'grey30', linewidth = .75, show.legend = FALSE) +
+    scale_fill_viridis_c(na.value = 'grey90', limits = c(0, 1))+
+    coord_equal() +
+    theme_void()
+  
+  print(p)
+  
+  ggsave(here('rasts_raw', sprintf('rast_spp1_impact_%s.png', s)), 
+         height = 3, width = 3, dpi = 300)
 }
 ```
 
@@ -148,7 +184,7 @@ chi_spp_df <- spp_impact_df %>%
 
 ggplot(chi_spp_df, aes(x, y)) +
   geom_tile(aes(fill = chi), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-  scale_fill_viridis_c(na.value = 'grey90')+
+  scale_fill_viridis_c(na.value = 'grey90', limits = chi_limits) +
   coord_equal() +
   theme_void()
 
@@ -160,7 +196,7 @@ ggsave(here('rasts_raw', 'rast_spp_chi.png'), height = 3, width = 3, dpi = 300)
 # 
 # ggplot(spp_rich_df, aes(x, y)) +
 #   geom_tile(aes(fill = spp_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-#   scale_fill_viridis_c(na.value = 'grey90')+
+#   scale_fill_gradient(low = '#ecfeff', high = 'slateblue4', na.value = 'grey90')+
 #   coord_equal() +
 #   theme_void()
 # 
@@ -192,7 +228,8 @@ for(f in unique(chi_per_fe_df$fe)) {
     coord_equal() +
     theme_void()
 
-  ggsave(here('rasts_raw', sprintf('rast_per_fe_%s_chi.png', f)), height = 3, width = 3, dpi = 300)
+  ggsave(here('rasts_raw', sprintf('rast_per_fe_%s_chi.png', f)), 
+         height = 3, width = 3, dpi = 300)
 
 }
 ```
@@ -208,41 +245,32 @@ chi_fe_df <- spp_impact_df %>%
   summarize(fe_mean = mean(impact),
             fv = .5^(n()-1)) %>%
   group_by(x, y) %>%
-  summarize(chi = sum(fe_mean * fv) / sum(fv))
+  summarize(chi = sum(fe_mean * fv) / sum(fv),
+            fv = mean(fv))
 
 ggplot(chi_fe_df, aes(x, y)) +
   geom_tile(aes(fill = chi), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-  scale_fill_viridis_c(na.value = 'grey90')+
+  scale_fill_viridis_c(na.value = 'grey90', limits = chi_limits) +
   coord_equal() +
   theme_void()
 
 ggsave(here('rasts_raw', 'rast_fe_chi.png'), height = 3, width = 3, dpi = 300)
-
-# fe_rich_df <- spp_df %>%
-#   filter(pres == 1) %>%
-#   mutate(fe = ifelse(spp == 'spp1', 1, 2)) %>%
-#   group_by(x, y) %>%
-#   summarize(func_rich = n_distinct(fe),
-#             fv = .5^(n()-1))
-# 
-# ggplot(fe_rich_df, aes(x, y)) +
-#   geom_tile(aes(fill = func_rich), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-#   scale_fill_viridis_c(na.value = 'grey90')+
-#   coord_equal() +
-#   theme_void()
-# 
-# ggsave(here('rasts_raw', 'rast_fe_richness.png'), height = 3, width = 3, dpi = 300)
-
 ```
+
 and diff raster
+
 ```{r}
-fe_spp_diff <- left_join(chi_spp_df, chi_fe_df %>% rename(chi_fe = chi)) %>% mutate(d = chi_fe - chi)
+fe_spp_diff <- left_join(chi_spp_df, chi_fe_df %>% 
+                           rename(chi_fe = chi)) %>% 
+  mutate(d = chi_fe - chi,
+         d = ifelse(d > 0, d * .5, d))
 
 pal <- hcl.colors(3, palette = 'Red-Green')
 
 ggplot(fe_spp_diff, aes(x, y)) +
   geom_tile(aes(fill = d), color = 'grey30', linewidth = .75, show.legend = FALSE) +
-  scale_fill_gradient2(high = pal[1], low = pal[3], mid = pal[2], midpoint = 0, limits = c(-.3, .3))+
+  scale_fill_gradient2(high = pal[1], low = pal[3], mid = pal[2], 
+                       midpoint = 0, limits = c(-.4, .4))+
   coord_equal() +
   theme_void()
 
@@ -267,8 +295,8 @@ for(f in raw_fs) {
 }
 ```
 
-
-
-
+![](rasts_xfm/rast_fe_chi.png)
+![](rasts_xfm/rast_spp_chi.png)
+![](rasts_xfm/rast_fe_spp_diff.png)
 
 
